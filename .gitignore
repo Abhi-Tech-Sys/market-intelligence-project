@@ -1,0 +1,18 @@
+# Python
+backend/venv/
+backend/env/
+__pycache__/
+*.pyc
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+
+# Secrets
+.env
+backend/.env
+
+# OS junk
+.DS_Store
+Thumbs.db
+.ipynb_checkpoints/
