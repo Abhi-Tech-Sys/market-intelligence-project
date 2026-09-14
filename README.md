@@ -40,9 +40,9 @@ provenance notes.
 
 ## Status
 
-- [ ] Data collection (run fetch_from_yahoo.py)
-- [ ] Data cleaning
-- [ ] EDA
+- [x] Data collection (run fetch_from_yahoo.py)
+- [x] Data cleaning
+- [x] EDA
 - [ ] Feature engineering
 - [ ] Baseline model
 - [ ] Time-aware validation
