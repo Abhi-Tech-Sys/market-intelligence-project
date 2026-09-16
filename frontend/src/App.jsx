@@ -76,30 +76,34 @@ function App() {
   const [predictions, setPredictions] = useState(null)
   const [latestData, setLatestData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [predRes, latestRes] = await Promise.all([
-          fetch(`${API_BASE}/predict`),
-          fetch(`${API_BASE}/latest-data`),
-        ])
+  async function fetchData(isRefresh = false) {
+    if (isRefresh) setRefreshing(true)
+    setError(null)
+    try {
+      const [predRes, latestRes] = await Promise.all([
+        fetch(`${API_BASE}/predict`),
+        fetch(`${API_BASE}/latest-data`),
+      ])
 
-        if (!predRes.ok || !latestRes.ok) {
-          throw new Error('API request failed — is the backend server running?')
-        }
-
-        setPredictions(await predRes.json())
-        setLatestData(await latestRes.json())
-      } catch (err) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
+      if (!predRes.ok || !latestRes.ok) {
+        throw new Error('API request failed — is the backend server running?')
       }
-    }
 
-    fetchData()
+      setPredictions(await predRes.json())
+      setLatestData(await latestRes.json())
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData(false)
   }, [])
 
   if (loading) {
@@ -130,14 +134,23 @@ function App() {
 
   return (
     <div className="min-h-screen px-6 py-10 max-w-6xl mx-auto">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-100">
-          NIFTY 50 Market Intelligence
-        </h1>
-        <p className="text-slate-400 mt-1">
-          Movement probability forecast — data through{' '}
-          <span className="text-slate-300">{predictions.based_on_data_through}</span>
-        </p>
+      <header className="mb-8 flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-100">
+            NIFTY 50 Market Intelligence
+          </h1>
+          <p className="text-slate-400 mt-1">
+            Movement probability forecast — data through{' '}
+            <span className="text-slate-300">{predictions.based_on_data_through}</span>
+          </p>
+        </div>
+        <button
+          onClick={() => fetchData(true)}
+          disabled={refreshing}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
+        >
+          {refreshing ? 'Refreshing…' : '↻ Refresh Prediction'}
+        </button>
       </header>
 
       {latestData && (
