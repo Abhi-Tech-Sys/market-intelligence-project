@@ -1,0 +1,62 @@
+name: Daily Data Refresh
+
+# WHY THIS EXISTS:
+# Render's free tier wipes any files written while the app is running
+# whenever the container restarts (spin-down after inactivity, or any
+# redeploy). This means clicking "Fetch Latest Data" in the dashboard
+# only has a temporary effect — it works live, but doesn't persist.
+#
+# This workflow solves that properly: it runs automatically on a
+# schedule, re-fetches and re-processes the NIFTY 50 data, and commits
+# the updated CSV files back to the repo. Since Render is connected to
+# this repo, that commit automatically triggers a redeploy — meaning the
+# live site always has genuinely current data baked in, with zero manual
+# steps required going forward.
+#
+# This does NOT retrain the model (that stays a deliberate, manual,
+# periodic step via train_model.py — retraining doesn't need to happen
+# daily, see backend/src/api.py's refresh-data endpoint comments for the
+# same reasoning).
+
+on:
+  schedule:
+    # Runs at 00:00 UTC every day (adjust if you want a different time).
+    # Cron syntax: minute hour day month day-of-week
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    # This lets you also trigger it manually from the GitHub Actions tab,
+    # instead of only waiting for the schedule — useful for testing.
+
+jobs:
+  refresh-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # needed so this workflow can commit/push back to the repo
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run the data pipeline
+        run: |
+          python backend/src/fetch_from_yahoo.py
+          python backend/src/clean_data.py
+          python backend/src/feature_engineering.py
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/data/
+          # Only commit if something actually changed — avoids empty
+          # commits on days the market was closed / data didn't move.
+          git diff --staged --quiet || git commit -m "Automated daily data refresh"
+          git push
