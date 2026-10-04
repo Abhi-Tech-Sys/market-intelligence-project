@@ -2,7 +2,160 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #0f172a;
-  color: #f1f5f9;
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #0b0f19;
+    color: #f1f5f9;
+    min-height: 100vh;
+    background-image: 
+      radial-gradient(at 10% 10%, rgba(14, 165, 233, 0.08) 0px, transparent 50%),
+      radial-gradient(at 90% 90%, rgba(99, 102, 241, 0.06) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+  
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
 }
+
+/* ================================================================
+   ANIMATIONS — Make the UI feel alive and dynamic
+   ================================================================ */
+
+/* Tab/section fade-in on mount */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Staggered card entry — each card slides up with a slight delay */
+@keyframes cardEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Subtle continuous glow pulse on the stat numbers */
+@keyframes glowPulse {
+  0%, 100% { text-shadow: 0 0 8px currentColor; }
+  50%       { text-shadow: 0 0 20px currentColor, 0 0 40px currentColor; }
+}
+
+/* Ticker scan-line shimmer on the header bar */
+@keyframes scanLine {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* Soft border glow breathe */
+@keyframes borderBreathe {
+  0%, 100% { box-shadow: 0 0 0px rgba(6, 182, 212, 0); }
+  50%       { box-shadow: 0 0 16px rgba(6, 182, 212, 0.2); }
+}
+
+/* ================================================================
+   UTILITY CLASSES
+   ================================================================ */
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.45s ease-out both;
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.35s ease-out both;
+}
+
+/* Card entrance — apply to each horizon card */
+.card-enter-1 { animation: cardEntrance 0.5s ease-out 0.05s both; }
+.card-enter-2 { animation: cardEntrance 0.5s ease-out 0.15s both; }
+.card-enter-3 { animation: cardEntrance 0.5s ease-out 0.25s both; }
+
+/* Content swap fade (trader ↔ quant toggle) */
+.content-swap-enter {
+  animation: fadeInUp 0.25s ease-out both;
+}
+
+/* Glow on key numbers */
+.stat-glow {
+  animation: glowPulse 3s ease-in-out infinite;
+}
+
+/* Breathe border on active cards */
+.card-breathe {
+  animation: borderBreathe 4s ease-in-out infinite;
+}
+
+/* Scan-line shimmer bar */
+.shimmer-bar {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(6, 182, 212, 0.15) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: scanLine 3s linear infinite;
+}
+
+/* ================================================================
+   LAYOUT UTILITIES
+   ================================================================ */
+
+/* Force equal-height card rows */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fixed-height card content area — prevents collapse on toggle */
+.card-content-area {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* Range input styling */
+input[type="range"] {
+  height: 6px;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+

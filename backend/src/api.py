@@ -20,6 +20,8 @@ works BEFORE building any UI on top of it.
 
 import pandas as pd
 import joblib
+import subprocess
+import sys
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -189,4 +191,75 @@ def latest_data():
         "daily_return_pct": round(float(latest_row["Daily_Return_Pct"]), 2),
         "rsi_14": round(float(latest_row["RSI_14"]), 1),
         "rolling_volatility_20d": round(float(latest_row["Rolling_Volatility_20d"]), 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# STEP 6: Refresh data endpoint — this is what makes "Refresh" in the UI
+# actually pull NEW data, instead of just re-showing the same frozen answer
+# ---------------------------------------------------------------------------
+@app.post("/refresh-data")
+def refresh_data():
+    """
+    Re-runs the data pipeline (fetch -> clean -> feature engineering) to
+    pull in the latest trading days, then reloads the result into memory
+    so /predict and /latest-data immediately reflect the new data —
+    WITHOUT needing to restart the whole server manually.
+
+    WHY WE USE subprocess HERE (running the scripts as separate processes)
+    rather than importing and calling their logic directly: those scripts
+    were written and tested as standalone, independently runnable steps
+    (each with its own clear "run this file directly" purpose, matching
+    how you've been running and verifying them one at a time throughout
+    this project). Re-using them via subprocess means we get the exact
+    same tested behavior here, with no risk of subtly rewriting their
+    logic differently inside the API and introducing a new bug.
+
+    WHY WE DON'T RETRAIN THE MODEL HERE: retraining is a much heavier,
+    slower operation, and doesn't need to happen every time new data
+    arrives — a model trained on years of history doesn't meaningfully
+    change from one extra day of data. Retraining periodically (e.g.
+    monthly) by manually re-running train_model.py is the realistic,
+    correct approach — this endpoint only refreshes the DATA the already
+    -trained model predicts from.
+    """
+    global features_df
+
+    python_exe = sys.executable  # use the SAME Python (and venv) this
+                                  # server is already running under —
+                                  # never assume a bare "python" command
+                                  # would resolve to the right environment
+    scripts = [
+        SCRIPT_DIR / "fetch_from_yahoo.py",
+        SCRIPT_DIR / "clean_data.py",
+        SCRIPT_DIR / "feature_engineering.py",
+    ]
+
+    logs = []
+    for script in scripts:
+        result = subprocess.run(
+            [python_exe, str(script)],
+            capture_output=True, text=True, cwd=str(BACKEND_DIR),
+        )
+        logs.append({"script": script.name, "returncode": result.returncode})
+        if result.returncode != 0:
+            # A script failed — stop immediately and report exactly what
+            # went wrong, rather than silently continuing with stale or
+            # partial data.
+            raise HTTPException(
+                status_code=500,
+                detail=f"{script.name} failed:\n{result.stderr[-1000:]}",
+            )
+
+    # Reload the freshly-regenerated features file into memory so
+    # subsequent /predict calls immediately use the new data.
+    features_df = pd.read_csv(FEATURES_PATH, parse_dates=["Date"])
+    features_df = features_df.sort_values("Date").reset_index(drop=True)
+
+    latest_date = features_df["Date"].iloc[-1]
+    return {
+        "status": "success",
+        "message": "Data refreshed successfully.",
+        "new_latest_date": str(latest_date.date()),
+        "steps_run": logs,
     }
