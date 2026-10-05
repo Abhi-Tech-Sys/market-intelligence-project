@@ -20,9 +20,17 @@ name: Daily Data Refresh
 
 on:
   schedule:
-    # Runs at 00:00 UTC every day (adjust if you want a different time).
+    # Runs at 11:00 UTC = 4:30 PM IST, Monday-Friday only.
+    # WHY THIS TIME SPECIFICALLY: NSE (the Indian stock exchange) closes
+    # at 3:30 PM IST. Running at 4:30 PM IST gives Yahoo Finance an hour
+    # to actually have that day's closing data available. Running too
+    # early (e.g. right after midnight, before market even opens) means
+    # the fetch finds nothing new, so nothing gets committed — which is
+    # exactly the symptom of "the Action ran but nothing changed."
+    # "1-5" = Monday through Friday only, since markets are closed on
+    # weekends and there's nothing new to fetch then anyway.
     # Cron syntax: minute hour day month day-of-week
-    - cron: '0 0 * * *'
+    - cron: '0 11 * * 1-5'
   workflow_dispatch:
     # This lets you also trigger it manually from the GitHub Actions tab,
     # instead of only waiting for the schedule — useful for testing.
@@ -58,5 +66,13 @@ jobs:
           git add backend/data/
           # Only commit if something actually changed — avoids empty
           # commits on days the market was closed / data didn't move.
-          git diff --staged --quiet || git commit -m "Automated daily data refresh"
-          git push
+          # The echo statements here exist specifically so you can open
+          # this step's log and immediately see which path was taken,
+          # instead of having to guess why nothing updated.
+          if git diff --staged --quiet; then
+            echo "No data changes detected — nothing to commit. (This is expected if the market was closed, or if this ran before new data was available.)"
+          else
+            git commit -m "Automated daily data refresh"
+            git push
+            echo "Data changed — committed and pushed successfully."
+          fi
