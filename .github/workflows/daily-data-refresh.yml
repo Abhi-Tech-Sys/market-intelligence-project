@@ -73,6 +73,7 @@ jobs:
             echo "No data changes detected — nothing to commit. (This is expected if the market was closed, or if this ran before new data was available.)"
           else
             git commit -m "Automated daily data refresh"
+            git pull --rebase origin main
             git push
             echo "Data changed — committed and pushed successfully."
           fi
