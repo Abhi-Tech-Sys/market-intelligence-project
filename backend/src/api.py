@@ -63,7 +63,7 @@ app = FastAPI(
 # confusing browser-only error that never appears here in the backend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://market-intelligence-theta-six.vercel.app/"],  # for development; in production, restrict this
+    allow_origins=["https://market-intelligence-theta-six.vercel.app"],  # for development; in production, restrict this
                             # to your actual deployed frontend's URL
     allow_methods=["*"],
     allow_headers=["*"],

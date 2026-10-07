@@ -36,7 +36,7 @@ on:
     # instead of only waiting for the schedule — useful for testing.
 
 jobs:
-  refresh-data:
+  refresh-data: 
     runs-on: ubuntu-latest
     permissions:
       contents: write  # needed so this workflow can commit/push back to the repo
