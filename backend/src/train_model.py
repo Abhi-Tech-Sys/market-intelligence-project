@@ -97,8 +97,10 @@ for horizon in HORIZONS:
     print(f"HORIZON: {horizon}")
     print(f"{'='*60}")
 
-    X_train, y_train = train_df[FEATURE_COLS], train_df[label_col]
-    X_test, y_test = test_df[FEATURE_COLS], test_df[label_col]
+    train_mask = train_df[label_col].notna()
+    test_mask = test_df[label_col].notna()
+    X_train, y_train = train_df.loc[train_mask, FEATURE_COLS], train_df.loc[train_mask, label_col]
+    X_test, y_test = test_df.loc[test_mask, FEATURE_COLS], test_df.loc[test_mask, label_col]
 
     # -----------------------------------------------------------------
     # 3a. Naive baseline — "always predict the most common class"

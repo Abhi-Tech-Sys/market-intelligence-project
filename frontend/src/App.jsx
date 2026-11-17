@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000'
+const API_BASE = (import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000').replace(/\/+$/, '')
+const IS_LOCAL = API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')
 
 // ── Visual Themes ──────────────────────────────────────────────────
 const THEMES = {
@@ -73,7 +74,7 @@ function getAdvice(horizonKey, data) {
   }
   // 20d
   if (down > up && down >= 40) return { stance: 'Protect Your Portfolio', play: `Monthly outlook leans bearish (${down}%). Consider reducing exposure or hedging existing positions.`, risk: 'Capital Protection' }
-  if (up > up && up >= 40) return { stance: 'Monthly Uptrend', play: `Structural tailwinds detected (${up}%). Trail stop-losses higher on winners.`, risk: 'Favorable' }
+  if (up > down && up >= 40) return { stance: 'Monthly Uptrend', play: `Structural tailwinds detected (${up}%). Trail stop-losses higher on winners.`, risk: 'Favorable' }
   return { stance: 'Range-Bound Month Ahead', play: `Monthly outlook shows no strong directional conviction. Focus on asset allocation.`, risk: 'Neutral' }
 }
 
@@ -410,10 +411,13 @@ function ScenarioSimulator({ defaultRsi, defaultVol }) {
 // ═══════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════════
 function App() {
   const [predictions, setPredictions] = useState(null)
   const [latestData, setLatestData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [coldStartProgress, setColdStartProgress] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshingData, setRefreshingData] = useState(false)
   const [error, setError] = useState(null)
@@ -424,20 +428,83 @@ function App() {
     setTimeout(() => setToast(null), 3500)
   }
 
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal })
+      clearTimeout(timer)
+      return res
+    } catch (err) {
+      clearTimeout(timer)
+      throw err
+    }
+  }
+
+  async function executeFetch() {
+    const ts = Date.now()
+    const [predRes, latestRes] = await Promise.all([
+      fetchWithTimeout(`${API_BASE}/predict?t=${ts}`, { cache: 'no-store' }, 20000),
+      fetchWithTimeout(`${API_BASE}/latest-data?t=${ts}`, { cache: 'no-store' }, 20000),
+    ])
+    if (!predRes.ok || !latestRes.ok) {
+      throw new Error(`API returned error status (predict: ${predRes.status}, latest: ${latestRes.status})`)
+    }
+    const predData = await predRes.json()
+    const latest = await latestRes.json()
+    return { predData, latest }
+  }
+
   async function fetchData(isRefresh = false) {
     if (isRefresh) setRefreshing(true)
     setError(null)
-    try {
-      const [predRes, latestRes] = await Promise.all([
-        fetch(`${API_BASE}/predict`),
-        fetch(`${API_BASE}/latest-data`),
-      ])
-      if (!predRes.ok || !latestRes.ok) throw new Error('API request failed — is the backend running?')
-      setPredictions(await predRes.json())
-      setLatestData(await latestRes.json())
-      if (isRefresh) showToast('Predictions updated!', 'success')
-    } catch (err) { setError(err.message) }
-    finally { setLoading(false); setRefreshing(false) }
+
+    // Free-tier cloud instances (like Render) sleep when idle and take 45-60s to wake up.
+    // Retrying with progressive backoff ensures users never get stranded with "Failed to fetch".
+    const maxAttempts = isRefresh ? 2 : 14
+    let attempt = 0
+    let lastError = null
+
+    while (attempt < maxAttempts) {
+      attempt++
+      try {
+        if (!isRefresh && attempt > 1) {
+          setColdStartProgress({
+            attempt,
+            maxAttempts,
+          })
+        }
+        const { predData, latest } = await executeFetch()
+        setPredictions(predData)
+        setLatestData(latest)
+        setError(null)
+        setColdStartProgress(null)
+        setLoading(false)
+        setRefreshing(false)
+        if (isRefresh) showToast('Predictions updated!', 'success')
+        else if (attempt > 1) showToast('Cloud engine connected successfully!', 'success')
+        return
+      } catch (err) {
+        lastError = err
+        if (isRefresh) break
+        if (attempt < maxAttempts) {
+          setColdStartProgress({
+            attempt,
+            maxAttempts,
+          })
+          await new Promise((r) => setTimeout(r, 4500))
+        }
+      }
+    }
+
+    setColdStartProgress(null)
+    setLoading(false)
+    setRefreshing(false)
+    setError(
+      lastError?.name === 'AbortError' || lastError?.message?.includes('Failed to fetch')
+        ? 'Cloud backend unreachable or took too long to wake up. Please retry.'
+        : lastError?.message || 'Failed to connect to backend.'
+    )
   }
 
   async function refreshFullData() {
@@ -445,32 +512,86 @@ function App() {
     setError(null)
     showToast('Pulling latest data from Yahoo Finance…', 'info')
     try {
-      const res = await fetch(`${API_BASE}/refresh-data`, { method: 'POST' })
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || 'Refresh failed.') }
+      const res = await fetchWithTimeout(`${API_BASE}/refresh-data`, { method: 'POST' }, 60000)
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        throw new Error(b.detail || `Refresh failed with status ${res.status}`)
+      }
+      const data = await res.json().catch(() => ({}))
       await fetchData(false)
-      showToast('Live data synced successfully!', 'success')
-    } catch (err) { setError(err.message); showToast(err.message, 'error') }
-    finally { setRefreshingData(false) }
+      const syncedDate = data.new_latest_date ? ` through ${data.new_latest_date}` : ''
+      showToast(`Live market data synced${syncedDate}!`, 'success')
+    } catch (err) {
+      setError(err.message)
+      showToast(err.message, 'error')
+    } finally {
+      setRefreshingData(false)
+    }
   }
 
   useEffect(() => { fetchData(false) }, [])
 
   if (loading) return (
-    <div className="min-h-screen flex flex-col items-center justify-center">
-      <div className="w-12 h-12 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin mb-4" />
-      <p className="font-mono text-sm text-cyan-400">Loading Market Intelligence…</p>
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 text-center">
+      <div className="relative w-16 h-16 mb-6">
+        <div className="w-16 h-16 rounded-full border-2 border-cyan-500/20 animate-ping absolute" />
+        <div className="w-16 h-16 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+      </div>
+      <h2 className="text-xl font-bold text-slate-100 mb-2">
+        {coldStartProgress ? 'Waking Up Cloud Backend…' : 'Loading Market Intelligence…'}
+      </h2>
+      {coldStartProgress ? (
+        <div className="max-w-md w-full bg-slate-900/90 p-5 rounded-2xl border border-slate-800 shadow-2xl">
+          <p className="text-xs text-slate-300 leading-relaxed mb-4">
+            Free-tier cloud backends (Render) automatically sleep when idle and take ~45–60s to boot on first request.
+          </p>
+          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden mb-3 border border-slate-700/50">
+            <div
+              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min((coldStartProgress.attempt / coldStartProgress.maxAttempts) * 100, 96)}%` }}
+            />
+          </div>
+          <div className="flex justify-between items-center text-[11px] font-mono text-slate-400">
+            <span>Attempt {coldStartProgress.attempt} of {coldStartProgress.maxAttempts}</span>
+            <span className="text-cyan-400 animate-pulse font-medium">Connecting automatically…</span>
+          </div>
+        </div>
+      ) : (
+        <p className="font-mono text-xs text-slate-400">Connecting to live engine…</p>
+      )}
     </div>
   )
 
   if (error && !predictions) return (
     <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="bg-slate-900 border border-rose-500/40 rounded-2xl p-7 max-w-lg shadow-2xl">
-        <h2 className="text-lg font-bold text-rose-400 mb-2">⚠️ Unable to Connect</h2>
-        <p className="text-slate-300 text-sm mb-4">{error}</p>
-        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-slate-400 mb-4">
-          <code>python -m uvicorn backend.src.api:app --reload --app-dir .</code>
+      <div className="bg-slate-900 border border-rose-500/40 rounded-2xl p-7 max-w-lg shadow-2xl w-full">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-2xl">⚠️</span>
+          <h2 className="text-lg font-bold text-rose-400">Unable to Connect</h2>
         </div>
-        <button onClick={() => fetchData(true)} className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-sm font-semibold transition-colors">↻ Retry</button>
+        <p className="text-slate-300 text-sm mb-4 leading-relaxed">{error}</p>
+        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-slate-400 mb-5 space-y-1">
+          <div className="text-slate-500">Target Backend API:</div>
+          <div className="text-cyan-300 break-all">{API_BASE}</div>
+          {IS_LOCAL ? (
+            <div className="pt-2 text-slate-400 border-t border-slate-800">
+              <code>python -m uvicorn backend.src.api:app --reload --app-dir .</code>
+            </div>
+          ) : (
+            <div className="pt-2 text-slate-400 border-t border-slate-800">
+              Free-tier instances may have spun down. Click below to reconnect automatically.
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => {
+            setLoading(true)
+            fetchData(false)
+          }}
+          className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-cyan-500/20"
+        >
+          ↻ Reconnect Now
+        </button>
       </div>
     </div>
   )
@@ -497,9 +618,16 @@ function App() {
             <span className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-bold">Live</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-100">NIFTY 50 Intelligence</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Data through <span className="text-slate-200 font-mono font-semibold">{predictions?.based_on_data_through}</span>
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-slate-400">
+              Data through <span className="text-slate-200 font-mono font-semibold">{predictions?.based_on_data_through || '—'}</span>
+            </p>
+            {predictions?.based_on_data_through && (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                Verified Fresh
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => fetchData(true)} disabled={refreshing || refreshingData} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-xl text-xs font-semibold text-slate-200 border border-slate-700 transition-all">

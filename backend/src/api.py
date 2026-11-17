@@ -18,6 +18,7 @@ directly, no frontend needed yet. This is how we verify the backend
 works BEFORE building any UI on top of it.
 """
 
+import os
 import pandas as pd
 import joblib
 import subprocess
@@ -25,6 +26,8 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 # ---------------------------------------------------------------------------
 # STEP 0: Robust paths + config
@@ -55,16 +58,40 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS (Cross-Origin Resource Sharing): by default, browsers block a
-# webpage running on one address (e.g. your React app on localhost:5173)
-# from calling an API on a different address (this backend on
-# localhost:8000) — CORS middleware explicitly allows it. Without this,
-# the React frontend we build later would fail to connect, with a
-# confusing browser-only error that never appears here in the backend.
+# ---------------------------------------------------------------------------
+# Middleware: No-Cache for dynamic intelligence endpoints
+# ---------------------------------------------------------------------------
+# Ensures browsers, CDNs, and proxies never serve stale cached predictions.
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path in ["/predict", "/latest-data", "/refresh-data", "/health", "/"]:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+app.add_middleware(NoCacheMiddleware)
+
+# CORS (Cross-Origin Resource Sharing):
+# Configured dynamically to support localhost development, the specific Vercel
+# deployment, any Vercel preview domain (*.vercel.app), and optional env variables.
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+extra_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
+cors_origins = [
+    "https://market-intelligence-theta-six.vercel.app",
+    "https://market-intelligence-project.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+] + extra_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://market-intelligence-theta-six.vercel.app"],  # for development; in production, restrict this
-                            # to your actual deployed frontend's URL
+    allow_origins=cors_origins,
+    allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -96,7 +123,7 @@ for horizon in HORIZONS:
 
 
 # ---------------------------------------------------------------------------
-# STEP 3: Root endpoint — simple health check
+# STEP 3: Root and Health check endpoints
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
@@ -106,6 +133,15 @@ def root():
         "models_loaded": list(models.keys()),
         "data_loaded": features_df is not None,
     }
+
+
+@app.get("/health", status_code=200)
+def health():
+    """
+    Lightweight keep-alive endpoint for external pingers (e.g. Cron-job.org).
+    Returns immediately without touching models, datasets, or external services.
+    """
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

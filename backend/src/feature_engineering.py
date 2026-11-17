@@ -158,10 +158,12 @@ for label_name, horizon_days in HORIZONS.items():
 # ---------------------------------------------------------------------------
 # Rolling calculations (MA_50 especially) need 50 prior days to produce a
 # real value — the first 49 rows will have NaN for MA_50. We drop any row
-# with NaN in a feature or label column, since a model can't learn from
-# incomplete rows. This naturally removes the very start of the dataset
-# (where indicators haven't "warmed up" yet) and the very end (where
-# labels don't exist yet because we can't see the future beyond today).
+# with NaN in a feature column (the start of dataset warm-up period).
+#
+# IMPORTANT: We do NOT drop rows where label columns are NaN!
+# The most recent days (including today) have complete features, but their future
+# labels are unknown because the future has not happened yet. These latest rows
+# are precisely what the live API predicts on!
 feature_cols = [
     "MA_10", "MA_20", "MA_50", "Pct_From_MA_10", "Pct_From_MA_20",
     "Pct_From_MA_50", "RSI_14", "MACD", "MACD_Signal", "MACD_Diff",
@@ -170,7 +172,7 @@ feature_cols = [
 label_cols = [f"Label_{name}" for name in HORIZONS]
 
 before = len(df)
-df = df.dropna(subset=feature_cols + label_cols).reset_index(drop=True)
+df = df.dropna(subset=feature_cols).reset_index(drop=True)
 after = len(df)
 
 

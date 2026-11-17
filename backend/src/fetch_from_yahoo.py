@@ -57,6 +57,13 @@ END_DATE = None            # None = up to today, automatically
 # default to use.
 df = yf.download(TICKER, start=START_DATE, end=END_DATE, auto_adjust=True)
 
+# Validation: ensure Yahoo Finance returned real data before overwriting existing files
+if df is None or len(df) == 0:
+    raise RuntimeError(
+        f"Yahoo Finance returned an empty dataset for {TICKER}. "
+        f"Aborted write to avoid corrupting existing data."
+    )
+
 # ---------------------------------------------------------------------------
 # STEP 3: Save the raw download
 # ---------------------------------------------------------------------------
