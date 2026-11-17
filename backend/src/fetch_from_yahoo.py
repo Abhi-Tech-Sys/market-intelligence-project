@@ -64,6 +64,36 @@ if df is None or len(df) == 0:
         f"Aborted write to avoid corrupting existing data."
     )
 
+# Intelligent catch-up: Yahoo Finance occasionally lags by several hours in rolling
+# the day's final closing bar into the daily historical table. If the market has closed
+# and complete hourly candles exist for the day, synthesize and append the daily candle.
+try:
+    import pandas as pd
+    t = yf.Ticker(TICKER)
+    hourly = t.history(period="5d", interval="1h")
+    if not hourly.empty:
+        hourly_dates = hourly.index.tz_convert("Asia/Kolkata").date
+        daily_dates = {d.date() for d in df.index}
+        missing_dates = sorted(set(hourly_dates) - daily_dates)
+        for d in missing_dates:
+            day_hourly = hourly[hourly_dates == d]
+            # Ensure the market day completed (last trade hour >= 15:00 IST)
+            if any(day_hourly.index.tz_convert("Asia/Kolkata").hour >= 15):
+                dt_idx = pd.Timestamp(d)
+                row_dict = {
+                    ("Close", TICKER): float(day_hourly["Close"].iloc[-1]),
+                    ("High", TICKER): float(day_hourly["High"].max()),
+                    ("Low", TICKER): float(day_hourly["Low"].min()),
+                    ("Open", TICKER): float(day_hourly["Open"].iloc[0]),
+                    ("Volume", TICKER): int(day_hourly["Volume"].sum()),
+                }
+                new_row = pd.DataFrame(row_dict, index=[dt_idx])
+                new_row.index.name = "Date"
+                df = pd.concat([df, new_row])
+                print(f"Intraday catch-up added {d}: Close = {day_hourly['Close'].iloc[-1]:.2f}")
+except Exception as e:
+    print(f"Intraday catch-up skipped ({e}); proceeding with standard daily download.")
+
 # ---------------------------------------------------------------------------
 # STEP 3: Save the raw download
 # ---------------------------------------------------------------------------
