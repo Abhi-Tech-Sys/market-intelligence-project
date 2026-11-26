@@ -19,3 +19,9 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Private master guides & generation prompts
+COMPLETE_PROJECT_UNDERSTANDING_GUIDE.md
+PROMPT_FOR_PPT.md
+PROMPT_FOR_REPORT.md
+PROMPT_FOR_UNDERSTANDING.md
